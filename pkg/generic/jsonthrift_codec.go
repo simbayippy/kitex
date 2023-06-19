@@ -43,6 +43,7 @@ type jsonThriftCodec struct {
 	binaryWithBase64 bool
 }
 
+// descriptor provider here is `generic.NewThriftFileProvider(thriftFilePath)`, and remote.Paylodcodec is taken from the kitex/remote/codec/thrift library
 func newJsonThriftCodec(p DescriptorProvider, codec remote.PayloadCodec) (*jsonThriftCodec, error) {
 	svc := <-p.Provide()
 	c := &jsonThriftCodec{codec: codec, provider: p, binaryWithBase64: true}

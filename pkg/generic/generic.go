@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/kitex/pkg/remote"
+	"github.com/cloudwego/kitex/pkg/remote/codec/protobuf"
 	"github.com/cloudwego/kitex/pkg/remote/codec/thrift"
 	"github.com/cloudwego/kitex/pkg/serviceinfo"
 )
@@ -103,6 +104,7 @@ func HTTPPbThriftGeneric(p DescriptorProvider, pbp PbDescriptorProvider) (Generi
 //	g, err := generic.JSONThriftGeneric(p)
 //	SetBinaryWithBase64(g, false)
 func JSONThriftGeneric(p DescriptorProvider) (Generic, error) {
+	//var thriftCodec = thrift.NewThriftCodec()
 	codec, err := newJsonThriftCodec(p, thriftCodec)
 	if err != nil {
 		return nil, err
@@ -129,6 +131,7 @@ func SetBinaryWithBase64(g Generic, enable bool) error {
 	return nil
 }
 
+// locally declared variable taken from remote/codec/thrift
 var thriftCodec = thrift.NewThriftCodec()
 
 type binaryThriftGeneric struct{}
@@ -199,6 +202,41 @@ func (g *jsonThriftGeneric) GetMethod(req interface{}, method string) (*Method, 
 }
 
 func (g *jsonThriftGeneric) Close() error {
+	return g.codec.Close()
+}
+
+func JSONProtoGeneric(p PbDescriptorProvider) (Generic, error) {
+	//var thriftCodec = thrift.NewThriftCodec()
+	codec, err := newJsonProtobufCodec(p, protoCodec)
+	if err != nil {
+		return nil, err
+	}
+	return &jsonProtoGeneric{codec: codec}, nil
+}
+
+var protoCodec = protobuf.NewProtobufCodec() // Replace this with your actual proto codec
+
+type jsonProtoGeneric struct {
+	codec *jsonProtobufCodec
+}
+
+func (g *jsonProtoGeneric) Framed() bool {
+	return false
+}
+
+func (g *jsonProtoGeneric) PayloadCodecType() serviceinfo.PayloadCodec {
+	return serviceinfo.Protobuf
+}
+
+func (g *jsonProtoGeneric) PayloadCodec() remote.PayloadCodec {
+	return g.codec
+}
+
+func (g *jsonProtoGeneric) GetMethod(req interface{}, method string) (*Method, error) {
+	return g.codec.getMethod(req, method)
+}
+
+func (g *jsonProtoGeneric) Close() error {
 	return g.codec.Close()
 }
 
