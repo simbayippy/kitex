@@ -30,7 +30,8 @@ import (
 
 var (
 	_ remote.PayloadCodec = &jsonThriftCodec{}
-	_ Closer              = &jsonThriftCodec{}
+	// Closer has the method Close
+	_ Closer = &jsonThriftCodec{}
 )
 
 // JSONRequest alias of string

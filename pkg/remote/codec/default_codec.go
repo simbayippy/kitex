@@ -166,7 +166,8 @@ func (c *defaultCodec) DecodeMeta(ctx context.Context, message remote.Message, i
 			return perrors.NewProtocolErrorWithErrMsg(err, fmt.Sprintf("meshHeader read payload first 8 byte failed: %s", err.Error()))
 		}
 	}
-	return checkPayload(flagBuf, message, in, isTTHeader, c.maxSize)
+	err2 := checkPayload(flagBuf, message, in, isTTHeader, c.maxSize)
+	return err2
 }
 
 // DecodePayload decode payload
@@ -184,6 +185,7 @@ func (c *defaultCodec) DecodePayload(ctx context.Context, message remote.Message
 	if err != nil {
 		return err
 	}
+	// calls the jsonproto_codec/jsonthrift_codec's unmarshal
 	if err = pCodec.Unmarshal(ctx, message, in); err != nil {
 		return err
 	}
@@ -295,6 +297,7 @@ func checkPayload(flagBuf []byte, message remote.Message, in remote.ByteBuffer, 
 	var transProto transport.Protocol
 	var codecType serviceinfo.PayloadCodec
 	if isThriftBinary(flagBuf) {
+		// fmt.Print("\nLog: is thrift binary\n")
 		codecType = serviceinfo.Thrift
 		if isTTHeader {
 			transProto = transport.TTHeader
@@ -314,6 +317,7 @@ func checkPayload(flagBuf []byte, message remote.Message, in remote.ByteBuffer, 
 			return err
 		}
 	} else if isProtobufKitex(flagBuf) {
+		// fmt.Print("\nLog: is proto binary\n")
 		codecType = serviceinfo.Protobuf
 		if isTTHeader {
 			transProto = transport.TTHeaderFramed

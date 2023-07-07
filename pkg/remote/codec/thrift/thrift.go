@@ -114,7 +114,7 @@ func (c thriftCodec) Marshal(ctx context.Context, message remote.Message, out re
 	if err := tProt.WriteMessageBegin(methodName, thrift.TMessageType(msgType), seqID); err != nil {
 		return perrors.NewProtocolErrorWithMsg(fmt.Sprintf("thrift marshal, WriteMessageBegin failed: %s", err.Error()))
 	}
-	switch msg := data.(type) {
+	switch msg := data.(type) { // NOTE: this is a special syntax used within a switch statement to perform a type assertion on data.
 	case MessageWriter:
 		if err := msg.Write(tProt); err != nil {
 			return perrors.NewProtocolErrorWithErrMsg(err, fmt.Sprintf("thrift marshal, Write failed: %s", err.Error()))

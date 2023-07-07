@@ -19,6 +19,7 @@ package genericclient
 
 import (
 	"context"
+	// "fmt"
 	"runtime"
 
 	"github.com/cloudwego/kitex/client"
@@ -31,6 +32,7 @@ var _ Client = &genericServiceClient{}
 
 // NewClient create a generic client
 func NewClient(destService string, g generic.Generic, opts ...client.Option) (Client, error) {
+	// fmt.Print("\nLog: generic client's NewClient called\n")
 	svcInfo := generic.ServiceInfo(g.PayloadCodecType())
 	return NewClientWithServiceInfo(destService, g, svcInfo, opts...)
 }
@@ -48,7 +50,7 @@ func NewClientWithServiceInfo(destService string, g generic.Generic, svcInfo *se
 	}
 	cli := &genericServiceClient{
 		kClient: kc,
-		g:       g,
+		g:       g, // sets g as the generic thingy
 	}
 	runtime.SetFinalizer(cli, (*genericServiceClient).Close)
 
@@ -91,11 +93,13 @@ type genericServiceClient struct {
 }
 
 func (gc *genericServiceClient) GenericCall(ctx context.Context, method string, request interface{}, callOptions ...callopt.Option) (response interface{}, err error) {
+	// fmt.Print("\nLog: generic client's GenericCall called\n")
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	// generic.Args: Args is type from generic service
 	var _args generic.Args
 	_args.Method = method
 	_args.Request = request
-	mt, err := gc.g.GetMethod(request, method)
+	mt, err := gc.g.GetMethod(request, method) //HERE?? no
 	if err != nil {
 		return nil, err
 	}

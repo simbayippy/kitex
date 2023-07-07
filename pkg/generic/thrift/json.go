@@ -48,11 +48,14 @@ func NewWriteJSON(svc *descriptor.ServiceDescriptor, method string, isClient boo
 
 // WriteJSON implement of MessageWriter
 type WriteJSON struct {
+	// ty represents the expected Thrift type
+	// i.e. guides the writing of the JSON string into a Thrift message.
 	ty             *descriptor.TypeDescriptor
 	hasRequestBase bool
 	base64Binary   bool
 }
 
+// MEANING: WriteJSON needs to implement MessageWriter, which has the method Write
 var _ MessageWriter = (*WriteJSON)(nil)
 
 // SetBase64Binary enable/disable Base64 decoding for binary.

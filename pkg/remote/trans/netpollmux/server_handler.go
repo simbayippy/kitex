@@ -378,9 +378,9 @@ func (t *svrTransHandler) OnError(ctx context.Context, err error, conn net.Conn)
 	} else {
 		var de *kerrors.DetailedError
 		if ok := errors.As(err, &de); ok && de.Stack() != "" {
-			klog.CtxErrorf(ctx, "KITEX: processing request error, remoteService=%s, remoteAddr=%v, error=%s\nstack=%s", rService, rAddr, err.Error(), de.Stack())
+			klog.CtxErrorf(ctx, "KITEX: processing request error 3 , remoteService=%s, remoteAddr=%v, error=%s\nstack=%s", rService, rAddr, err.Error(), de.Stack())
 		} else {
-			klog.CtxErrorf(ctx, "KITEX: processing request error, remoteService=%s, remoteAddr=%v, error=%s", rService, rAddr, err.Error())
+			klog.CtxErrorf(ctx, "KITEX: processing request error 4, remoteService=%s, remoteAddr=%v, error=%s", rService, rAddr, err.Error())
 		}
 	}
 }

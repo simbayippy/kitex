@@ -2,7 +2,8 @@ package generic
 
 import (
 	"context"
-	// "fmt"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/cloudwego/kitex/internal/mocks"
@@ -10,52 +11,65 @@ import (
 	"github.com/cloudwego/kitex/pkg/remote"
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
 	"github.com/cloudwego/kitex/transport"
-	// "google.golang.org/protobuf/proto"
+
+	"google.golang.org/protobuf/proto"
 )
 
-type MockRequest struct {
-	Msg     string            `protobuf:"bytes,1,opt,name=Msg,proto3" json:"Msg,omitempty"`
-	StrMap  map[string]string `protobuf:"bytes,2,rep,name=StrMap,proto3" json:"StrMap,omitempty"`
-	StrList []string          `protobuf:"bytes,3,rep,name=StrList,proto3" json:"StrList,omitempty"`
+func TestJsonProtobufCodec(t *testing.T) {
+	jpc, err := initJsonProtoCodec()
+	test.Assert(t, err == nil, err)
+	ctx := context.Background()
+
+	// encode // client side
+	sendMsg := initSendMsg(transport.TTHeader)
+	// fmt.Printf("details: %v\n\n", sendMsg)
+	out := remote.NewWriterBuffer(256)
+	fmt.Printf("\n\ndata to send %v\n\n", sendMsg.Data())
+	err2 := jpc.Marshal(ctx, sendMsg, out)
+	test.Assert(t, err2 == nil, err2)
+	fmt.Printf("\n\ndetails 2: %v\n", sendMsg.Data())
+
+	// decode server side
+	recvMsg := initRecvMsg()
+	buf, err := out.Bytes()
+	recvMsg.SetPayloadLen(len(buf))
+	test.Assert(t, err == nil, err)
+	in := remote.NewReaderBuffer(buf)
+	err = jpc.Unmarshal(ctx, recvMsg, in)
+	test.Assert(t, err == nil, err)
+	fmt.Printf("\n\ndata to send %v\n\n", recvMsg.Data())
+
+	// compare Req Arg
+	sendReq := (sendMsg.Data()).(*MockReqArgs).Req
+	recvReq := (recvMsg.Data()).(*MockReqArgs).Req
+	test.Assert(t, sendReq.Msg == recvReq.Msg)
+	test.Assert(t, len(sendReq.StrList) == len(recvReq.StrList))
+	test.Assert(t, len(sendReq.StrMap) == len(recvReq.StrMap))
+	for i, item := range sendReq.StrList {
+		fmt.Print(item)
+		fmt.Print(recvReq.StrList[i])
+		test.Assert(t, item == recvReq.StrList[i])
+	}
+	for k := range sendReq.StrMap {
+		test.Assert(t, sendReq.StrMap[k] == recvReq.StrMap[k])
+	}
 }
 
-func (m *MockRequest) Reset() { *m = MockRequest{} }
-
-// func (m *MockRequest) String() string { return proto.CompactTextString(m) }
-func (*MockRequest) ProtoMessage() {}
-
-func TestJsonProtobufCodec(t *testing.T) {
-	mainProtoContent := `
-		syntax = "proto3";
-		package test;
-
-		message MockRequest {
-			string Msg = 1;
-			map<string, string> StrMap = 2;
-			repeated string StrList = 3;
-		}
-		
-		service Mock {
-			rpc Test(MockRequest) returns (MockRequest);
-		}
-	`
-	p, err := NewPbContentProvider("mock.proto", map[string]string{"mock.proto": mainProtoContent})
-	test.Assert(t, err == nil)
-	jpc, err := newJsonProtobufCodec(p, protoCodec)
-	test.Assert(t, err == nil)
-	defer jpc.Close()
-	test.Assert(t, jpc.Name() == "JSONProtobuf")
+func TestException(t *testing.T) {
+	// protoCodec := protobuf.NewProtobufCodec()
+	jpc, err := initJsonProtoCodec()
+	test.Assert(t, err == nil, err)
 
 	ctx := context.Background()
-	// sendMsg := initProtoSendMsg(transport.TTHeader)
-
-	// Marshal side
+	ink := rpcinfo.NewInvocation("", "")
+	ri := rpcinfo.NewRPCInfo(nil, nil, ink, nil, nil)
+	errInfo := "mock exception"
+	transErr := remote.NewTransErrorWithMsg(remote.UnknownMethod, errInfo)
+	// encode server side
+	errMsg := initServerErrorMsg(transport.TTHeader, ri, transErr)
 	out := remote.NewWriterBuffer(256)
-	emptyMethodInk := rpcinfo.NewInvocation("", "")
-	emptyMethodRi := rpcinfo.NewRPCInfo(nil, nil, emptyMethodInk, nil, nil)
-	emptyMethodMsg := remote.NewMessage(nil, nil, emptyMethodRi, remote.Exception, remote.Client)
-	err = jpc.Marshal(ctx, emptyMethodMsg, out)
-	test.Assert(t, err.Error() == "empty methodName in protobuf Marshal")
+	err2 := jpc.Marshal(ctx, errMsg, out)
+	test.Assert(t, err2.Error() == "empty methodName in proto Marshal")
 
 	// Exception MsgType test
 	exceptionMsgTypeInk := rpcinfo.NewInvocation("", "Test")
@@ -64,47 +78,101 @@ func TestJsonProtobufCodec(t *testing.T) {
 	// Marshal side
 	err = jpc.Marshal(ctx, exceptionMsgTypeMsg, out)
 	test.Assert(t, err == nil)
-
-	// err = jpc.Marshal(ctx, emptyMethodMsg, out)
-	// fmt.Print(err)
-	// test.Assert(t, err == nil)
-
-	// // UnMarshal side
-	// recvMsg := initProtoRecvMsg()
-	// buf, err := out.Bytes()
-	// test.Assert(t, err == nil)
-	// recvMsg.SetPayloadLen(len(buf))
-	// in := remote.NewReaderBuffer(buf)
-	// err = jpc.Unmarshal(ctx, recvMsg, in)
-	// test.Assert(t, err == nil)
 }
 
-func initProtoSendMsg(tp transport.Protocol) remote.Message {
-	req := &MockRequest{
-		Msg: "Test",
-		StrMap: map[string]string{
-			"key": "value",
-		},
-		StrList: []string{"Test"},
+var (
+	svcInfo = mocks.ServiceInfo()
+)
+
+type MockReqArgs struct {
+	Req   *MockRequest
+	codec interface{} // Add a field to store the codec.
+}
+
+func (p *MockReqArgs) Marshal(out []byte) ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("jsonProtoCodec cannot be nil")
 	}
-	svcInfo := mocks.ServiceInfo()
+	if !p.IsSetReq() {
+		return out, fmt.Errorf("No req in MockReqArgs")
+	}
+	return proto.Marshal(p.Req)
+}
+
+func (p *MockReqArgs) Unmarshal(in []byte) error {
+	if p == nil {
+		return errors.New("jsonProtoCodec cannot be nil")
+	}
+	msg := new(MockRequest)
+	if err := proto.Unmarshal(in, msg); err != nil {
+		return err
+	}
+	p.Req = msg
+	return nil
+}
+
+func (p *MockReqArgs) GetReq() *MockRequest {
+	return p.Req
+}
+
+func (p *MockReqArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+func (m *MockReqArgs) SetCodec(codec interface{}) {
+	m.codec = codec
+}
+
+func initJsonProtoCodec() (*jsonProtoCodec, error) {
+	p, err := NewPbFileProvider("./json_test/idl/mock.proto")
+	if err != nil {
+		// handle error here
+		fmt.Printf("\n\nerror is: %v\n\n", err)
+		return nil, err
+	}
+
+	jpc, err := newJsonProtoCodec(p, protoCodec)
+	if err != nil {
+		// handle error here
+		fmt.Printf("\n\nerror is: %v\n\n", err)
+		return nil, err
+	}
+
+	return jpc, nil
+}
+
+func initSendMsg(tp transport.Protocol) remote.Message {
+	var _args MockReqArgs
+	_args.Req = prepareReq()
 	ink := rpcinfo.NewInvocation("", "Test")
-	ri := rpcinfo.NewRPCInfo(nil, nil, ink, nil, rpcinfo.NewRPCStats())
-	msg := remote.NewMessage(req, svcInfo, ri, remote.Call, remote.Client)
+	ri := rpcinfo.NewRPCInfo(nil, nil, ink, nil, nil)
+	msg := remote.NewMessage(&_args, svcInfo, ri, remote.Call, remote.Client)
 	msg.SetProtocolInfo(remote.NewProtocolInfo(tp, svcInfo.PayloadCodec))
 	return msg
 }
 
-func initProtoRecvMsg() remote.Message {
-	req := &MockRequest{
-		Msg: "Test",
-		StrMap: map[string]string{
-			"key": "value",
-		},
-		StrList: []string{"Test"},
-	}
+func initRecvMsg() remote.Message {
+	var _args MockReqArgs
 	ink := rpcinfo.NewInvocation("", "Test")
-	ri := rpcinfo.NewRPCInfo(nil, nil, ink, nil, rpcinfo.NewRPCStats())
-	msg := remote.NewMessage(req, mocks.ServiceInfo(), ri, remote.Call, remote.Server)
+	ri := rpcinfo.NewRPCInfo(nil, nil, ink, nil, nil)
+	msg := remote.NewMessage(&_args, svcInfo, ri, remote.Call, remote.Server)
 	return msg
+}
+
+func initServerErrorMsg(tp transport.Protocol, ri rpcinfo.RPCInfo, transErr *remote.TransError) remote.Message {
+	errMsg := remote.NewMessage(transErr, svcInfo, ri, remote.Exception, remote.Server)
+	errMsg.SetProtocolInfo(remote.NewProtocolInfo(tp, svcInfo.PayloadCodec))
+	return errMsg
+}
+
+func prepareReq() *MockRequest {
+	strMap := make(map[string]string)
+	strMap["key1"] = "val1"
+	strMap["key2"] = "val2"
+	strList := []string{"str1", "str2"}
+	req := &MockRequest{
+		Msg:     "MockReq",
+		StrMap:  strMap,
+		StrList: strList,
+	}
+	return req
 }

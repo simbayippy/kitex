@@ -109,9 +109,12 @@ func (b *defaultByteBuffer) Next(n int) (buf []byte, err error) {
 // Peek returns the next n bytes without advancing the reader.
 func (b *defaultByteBuffer) Peek(n int) (buf []byte, err error) {
 	if b.status&BitReadable == 0 {
+		fmt.Print("\n\nhere?\n\n") // not here
+
 		return nil, errors.New("unreadable buffer, cannot support Peek")
 	}
 	if err = b.readableCheck(n); err != nil {
+		fmt.Print("here?")
 		return nil, err
 	}
 	return b.buff[b.readIdx : b.readIdx+n], nil

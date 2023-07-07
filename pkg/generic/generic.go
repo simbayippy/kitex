@@ -104,12 +104,21 @@ func HTTPPbThriftGeneric(p DescriptorProvider, pbp PbDescriptorProvider) (Generi
 //	g, err := generic.JSONThriftGeneric(p)
 //	SetBinaryWithBase64(g, false)
 func JSONThriftGeneric(p DescriptorProvider) (Generic, error) {
-	//var thriftCodec = thrift.NewThriftCodec()
+	//var thriftCodec = thrift.NewThriftCodec() meaning thriftCodec is from: kitex/pkg/remote/codec/thrift
 	codec, err := newJsonThriftCodec(p, thriftCodec)
 	if err != nil {
 		return nil, err
 	}
 	return &jsonThriftGeneric{codec: codec}, nil
+}
+
+// implemented JSONProtoGeneric
+func JSONProtoGeneric(p PbDescriptorProvider) (Generic, error) {
+	codec, err := newJsonProtoCodec(p, protoCodec)
+	if err != nil {
+		return nil, err
+	}
+	return &jsonProtoGeneric{codec: codec}, nil
 }
 
 // SetBinaryWithBase64 enable/disable Base64 codec for binary field.
@@ -205,19 +214,11 @@ func (g *jsonThriftGeneric) Close() error {
 	return g.codec.Close()
 }
 
-func JSONProtoGeneric(p PbDescriptorProvider) (Generic, error) {
-	//var thriftCodec = thrift.NewThriftCodec()
-	codec, err := newJsonProtobufCodec(p, protoCodec)
-	if err != nil {
-		return nil, err
-	}
-	return &jsonProtoGeneric{codec: codec}, nil
-}
-
-var protoCodec = protobuf.NewProtobufCodec() // Replace this with your actual proto codec
+// implemented
+var protoCodec = protobuf.NewProtobufCodec()
 
 type jsonProtoGeneric struct {
-	codec *jsonProtobufCodec
+	codec *jsonProtoCodec
 }
 
 func (g *jsonProtoGeneric) Framed() bool {
@@ -239,6 +240,8 @@ func (g *jsonProtoGeneric) GetMethod(req interface{}, method string) (*Method, e
 func (g *jsonProtoGeneric) Close() error {
 	return g.codec.Close()
 }
+
+// implementation end
 
 type httpThriftGeneric struct {
 	codec *httpThriftCodec

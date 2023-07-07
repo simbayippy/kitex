@@ -18,6 +18,7 @@ package generic
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cloudwego/kitex/internal/mocks"
@@ -42,6 +43,7 @@ func TestJsonThriftCodec(t *testing.T) {
 	ctx := context.Background()
 	sendMsg := initJsonSendMsg(transport.TTHeader)
 
+	fmt.Print(sendMsg.Data())
 	// Marshal side
 	out := remote.NewWriterBuffer(256)
 	err = jtc.Marshal(ctx, sendMsg, out)
@@ -54,6 +56,7 @@ func TestJsonThriftCodec(t *testing.T) {
 	recvMsg.SetPayloadLen(len(buf))
 	in := remote.NewReaderBuffer(buf)
 	err = jtc.Unmarshal(ctx, recvMsg, in)
+	fmt.Print(recvMsg.Data())
 	test.Assert(t, err == nil)
 }
 

@@ -2,37 +2,35 @@ package generic
 
 import (
 	"context"
+	// "fmt"
 	"sync/atomic"
 
-	"github.com/cloudwego/kitex/pkg/generic/descriptor"
+	"github.com/cloudwego/kitex/pkg/generic/proto"
 	"github.com/cloudwego/kitex/pkg/remote"
 	"github.com/cloudwego/kitex/pkg/remote/codec"
 	"github.com/cloudwego/kitex/pkg/remote/codec/perrors"
 	"github.com/cloudwego/kitex/pkg/serviceinfo"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
+	"github.com/jhump/protoreflect/desc"
 )
 
-var (
-	_ remote.PayloadCodec = &jsonProtobufCodec{}
-	_ Closer              = &jsonProtobufCodec{}
-)
-
-type jsonProtobufCodec struct {
-	svcDsc   atomic.Value // *idl
+type jsonProtoCodec struct {
+	svcDsc   atomic.Value
 	provider PbDescriptorProvider
 	codec    remote.PayloadCodec
 }
 
-func newJsonProtobufCodec(p PbDescriptorProvider, codec remote.PayloadCodec) (*jsonProtobufCodec, error) {
+func newJsonProtoCodec(p PbDescriptorProvider, codec remote.PayloadCodec) (*jsonProtoCodec, error) {
+	if p == nil {
+		return nil, perrors.NewProtocolErrorWithMsg("PbDescriptorProvider cannot be nil")
+	}
 	svc := <-p.Provide()
-	c := &jsonProtobufCodec{codec: codec, provider: p}
+	c := &jsonProtoCodec{codec: codec, provider: p}
 	c.svcDsc.Store(svc)
 	go c.update()
 	return c, nil
 }
 
-func (c *jsonProtobufCodec) update() {
+func (c *jsonProtoCodec) update() {
 	for {
 		svc, ok := <-c.provider.Provide()
 		if !ok {
@@ -42,110 +40,80 @@ func (c *jsonProtobufCodec) update() {
 	}
 }
 
-func (c *jsonProtobufCodec) Marshal(ctx context.Context, msg remote.Message, out remote.ByteBuffer) error {
+func (c *jsonProtoCodec) Marshal(ctx context.Context, msg remote.Message, out remote.ByteBuffer) error {
+	// fmt.Printf("\nLog: jsonproto_codec Marshal called\n")
 	method := msg.RPCInfo().Invocation().MethodName()
 	if method == "" {
-		return perrors.NewProtocolErrorWithMsg("empty methodName in protobuf Marshal")
+		return perrors.NewProtocolErrorWithMsg("empty methodName in proto Marshal")
 	}
-
 	if msg.MessageType() == remote.Exception {
+		/*
+			if it's an exception, uses the default Protobuf codec to handle the exception.
+			Exceptions are not marshaled into JSON.
+		*/
 		return c.codec.Marshal(ctx, msg, out)
 	}
+	/*
+		Loads the service descriptor for the service that this codec is handling.
+		The service descriptor contains the metadata about the service, including the
+		definitions of its methods and the types it uses.
 
-	message, ok := msg.Data().(proto.Message)
+		If it fails to load the service descriptor, it returns an error.
+	*/
+	svcDsc, ok := c.svcDsc.Load().(*desc.ServiceDescriptor)
 	if !ok {
-		return perrors.NewProtocolErrorWithMsg("could not convert msg.Data() to proto.Message")
+		return perrors.NewProtocolErrorWithMsg("get parser ServiceDescriptor failed")
 	}
-
-	jsonBytes, err := protojson.MarshalOptions{}.Marshal(message)
+	/*
+		Creates a new JSON writer with method descriptor
+	*/
+	wm, err := proto.NewWriteJSON(svcDsc, method, msg.RPCRole() == remote.Client)
 	if err != nil {
-		return err
+		return perrors.NewProtocolErrorWithMsg("NewWriteJSON failed")
 	}
-	out.Write(jsonBytes)
-	return nil
+	/*
+		It sets the codec of the message to be the JSON writer that was just created.
+		This prepares the message data to be written out as JSON.
+	*/
+	msg.Data().(WithCodec).SetCodec(wm)
+	/*
+		It calls the (original) codec's Marshal function to actually write out the message data.
+		Because the message's codec was set to the JSON writer, the data will be written
+		out as JSON.
+	*/
+	return c.codec.Marshal(ctx, msg, out)
 }
 
-func (c *jsonProtobufCodec) Unmarshal(ctx context.Context, msg remote.Message, in remote.ByteBuffer) error {
+func (c *jsonProtoCodec) Unmarshal(ctx context.Context, msg remote.Message, in remote.ByteBuffer) error {
+	// fmt.Printf("\nLog: jsonproto_codec Unmarshal called\n")
 	if err := codec.NewDataIfNeeded(serviceinfo.GenericMethod, msg); err != nil {
 		return err
 	}
-
-	unm := &protojson.UnmarshalOptions{}
-	message, ok := msg.Data().(proto.Message)
+	svcDsc, ok := c.svcDsc.Load().(*desc.ServiceDescriptor)
 	if !ok {
-		return perrors.NewProtocolErrorWithMsg("could not convert msg.Data() to proto.Message")
+		return perrors.NewProtocolErrorWithMsg("get parser ServiceDescriptor failed")
 	}
-
-	data, err := in.Bytes()
-	if err != nil {
-		return err
-	}
-
-	err = unm.Unmarshal(data, message)
-	if err != nil {
-		return err
-	}
-	return nil
+	rm := proto.NewReadJSON(svcDsc)
+	msg.Data().(WithCodec).SetCodec(rm)
+	return c.codec.Unmarshal(ctx, msg, in)
 }
 
-func (c *jsonProtobufCodec) getMethod(req interface{}, method string) (*Method, error) {
-	fnSvc, err := c.svcDsc.Load().(*descriptor.ServiceDescriptor).LookupFunctionByMethod(method)
-	if err != nil {
-		return nil, err
+func (c *jsonProtoCodec) getMethod(req interface{}, method string) (*Method, error) {
+	fnSvc := c.svcDsc.Load().(*desc.ServiceDescriptor).FindMethodByName(method)
+	if fnSvc == nil {
+		return nil, perrors.NewProtocolErrorWithMsg("method not found")
 	}
-	return &Method{method, fnSvc.Oneway}, nil
+
+	// Note: In protobuf, there's no direct "oneway" equivalent as in Thrift
+	isOneway := false
+
+	return &Method{method, isOneway}, nil
 }
 
-func (c *jsonProtobufCodec) Name() string {
-	return "JSONProtobuf"
+func (c *jsonProtoCodec) Name() string {
+	return "JSONProto"
 }
 
-func (c *jsonProtobufCodec) Close() error {
+func (c *jsonProtoCodec) Close() error {
 	return c.provider.Close()
 }
-
-// package generic
-
-// import (
-// 	"context"
-// 	"errors"
-
-// 	"github.com/cloudwego/kitex/pkg/generic"
-// 	"github.com/cloudwego/kitex/pkg/remote"
-// 	"github.com/golang/protobuf/jsonpb"
-// 	"github.com/golang/protobuf/proto"
-// )
-
-// type jsonProtobufCodec struct {
-// 	marshaler   jsonpb.Marshaler
-// 	unmarshaler jsonpb.Unmarshaler
-// }
-
-// // NewJSONProtobufCodec creates a new codec for JSON-Protobuf conversion.
-// func NewJSONProtobufCodec() generic.Codec {
-// 	return &jsonProtobufCodec{
-// 		marshaler:   jsonpb.Marshaler{},
-// 		unmarshaler: jsonpb.Unmarshaler{},
-// 	}
-// }
-
-// // Encode encodes a message into JSON format.
-// func (c *jsonProtobufCodec) Marshal(ctx context.Context, message remote.Message, request interface{}) (data []byte, err error) {
-// 	if pb, ok := request.(proto.Message); ok {
-// 		return []byte(c.marshaler.MarshalToString(pb)), nil
-// 	}
-// 	return nil, errors.New("Invalid request for protobuf encoding")
-// }
-
-// // Decode decodes a message from JSON format.
-// func (c *jsonProtobufCodec) Unmarshal(ctx context.Context, message remote.Message, data []byte, response interface{}) (err error) {
-// 	if pb, ok := response.(proto.Message); ok {
-// 		return c.unmarshaler.UnmarshalString(string(data), pb)
-// 	}
-// 	return errors.New("Invalid response for protobuf decoding")
-// }
-
-// // Name provides the name of the codec.
-// func (c *jsonProtobufCodec) Name(ctx context.Context, message remote.Message) (name string, err error) {
-// 	return "jsonprotobuf", nil
-// }
